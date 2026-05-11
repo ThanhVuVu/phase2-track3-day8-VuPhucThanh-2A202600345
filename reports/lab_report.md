@@ -3,7 +3,7 @@
 ## 1. Thông tin sinh viên / nhóm
 
 - Họ và tên: Vũ Phúc Thành
-- Repo/commit: d:\phase2-track3-day8-langgraph-agent (Nộp bài cục bộ)
+- Repo/commit: https://github.com/ThanhVuVu/phase2-track3-day8-VuPhucThanh-2A202600345
 - Ngày thực hiện: 11/05/2026
 
 ## 2. Kiến trúc hệ thống (Architecture)
