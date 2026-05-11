@@ -19,6 +19,7 @@ def intake_node(state: AgentState) -> dict:
         "query": query,
         "messages": [f"intake:{query[:40]}"],
         "events": [make_event("intake", "completed", "query normalized")],
+        "steps": ["intake"],
     }
 
 
@@ -31,21 +32,33 @@ def classify_node(state: AgentState) -> dict:
     query = state.get("query", "").lower()
     words = query.split()
     clean_words = [w.strip("?!.,;:") for w in words]
+    
+    risky_keywords = {"refund", "delete", "send", "cancel", "remove", "revoke"}
+    tool_keywords = {"status", "order", "lookup", "check", "track", "find", "search"}
+    error_keywords = {"timeout", "fail", "error", "crash", "unavailable"}
+    
     route = Route.SIMPLE
     risk_level = "low"
-    if "refund" in query or "delete" in query or "send" in query:
+    
+    # Priority 1: Risky
+    if any(k in query for k in risky_keywords):
         route = Route.RISKY
         risk_level = "high"
-    elif "status" in query or "order" in query or "lookup" in query:
+    # Priority 2: Tool
+    elif any(k in query for k in tool_keywords):
         route = Route.TOOL
+    # Priority 3: Missing Info
     elif len(clean_words) < 5 and "it" in clean_words:
         route = Route.MISSING_INFO
-    elif "timeout" in query or "fail" in query:
+    # Priority 4: Error
+    elif any(k in query for k in error_keywords):
         route = Route.ERROR
+
     return {
         "route": route.value,
         "risk_level": risk_level,
         "events": [make_event("classify", "completed", f"route={route.value}")],
+        "steps": ["classify"],
     }
 
 
@@ -59,6 +72,7 @@ def ask_clarification_node(state: AgentState) -> dict:
         "pending_question": question,
         "final_answer": question,
         "events": [make_event("clarify", "completed", "missing information requested")],
+        "steps": ["clarify"],
     }
 
 
@@ -70,12 +84,16 @@ def tool_node(state: AgentState) -> dict:
     """
     attempt = int(state.get("attempt", 0))
     if state.get("route") == Route.ERROR.value and attempt < 2:
-        result = f"ERROR: transient failure attempt={attempt} scenario={state.get('scenario_id', 'unknown')}"
+        result = (
+            f"ERROR: transient failure attempt={attempt} "
+            f"scenario={state.get('scenario_id', 'unknown')}"
+        )
     else:
         result = f"mock-tool-result for scenario={state.get('scenario_id', 'unknown')}"
     return {
         "tool_results": [result],
         "events": [make_event("tool", "completed", f"tool executed attempt={attempt}")],
+        "steps": ["tool"],
     }
 
 
@@ -87,6 +105,7 @@ def risky_action_node(state: AgentState) -> dict:
     return {
         "proposed_action": "prepare refund or external action; approval required",
         "events": [make_event("risky_action", "pending_approval", "approval required")],
+        "steps": ["risky_action"],
     }
 
 
@@ -116,6 +135,7 @@ def approval_node(state: AgentState) -> dict:
     return {
         "approval": decision.model_dump(),
         "events": [make_event("approval", "completed", f"approved={decision.approved}")],
+        "steps": ["approval"],
     }
 
 
@@ -130,6 +150,7 @@ def retry_or_fallback_node(state: AgentState) -> dict:
         "attempt": attempt,
         "errors": errors,
         "events": [make_event("retry", "completed", "retry attempt recorded", attempt=attempt)],
+        "steps": ["retry"],
     }
 
 
@@ -145,6 +166,7 @@ def answer_node(state: AgentState) -> dict:
     return {
         "final_answer": answer,
         "events": [make_event("answer", "completed", "answer generated")],
+        "steps": ["answer"],
     }
 
 
@@ -158,11 +180,15 @@ def evaluate_node(state: AgentState) -> dict:
     if "ERROR" in latest:
         return {
             "evaluation_result": "needs_retry",
-            "events": [make_event("evaluate", "completed", "tool result indicates failure, retry needed")],
+            "events": [
+                make_event("evaluate", "completed", "tool result indicates failure, retry needed")
+            ],
+            "steps": ["evaluate"],
         }
     return {
         "evaluation_result": "success",
         "events": [make_event("evaluate", "completed", "tool result satisfactory")],
+        "steps": ["evaluate"],
     }
 
 
@@ -173,11 +199,24 @@ def dead_letter_node(state: AgentState) -> dict:
     TODO(student): persist to dead-letter queue, alert on-call, or create support ticket.
     """
     return {
-        "final_answer": "Request could not be completed after maximum retry attempts. Logged for manual review.",
-        "events": [make_event("dead_letter", "completed", f"max retries exceeded, attempt={state.get('attempt', 0)}")],
+        "final_answer": (
+            "Request could not be completed after maximum retry attempts. "
+            "Logged for manual review."
+        ),
+        "events": [
+            make_event(
+                "dead_letter", "completed", 
+                f"max retries exceeded, attempt={state.get('attempt', 0)}"
+            )
+        ],
+        "steps": ["dead_letter"],
     }
 
 
 def finalize_node(state: AgentState) -> dict:
     """Finalize the run and emit a final audit event."""
-    return {"events": [make_event("finalize", "completed", "workflow finished")]}
+    return {
+        "actual_route": state.get("route", "unknown"),
+        "events": [make_event("finalize", "completed", "workflow finished")],
+        "steps": ["finalize"],
+    }

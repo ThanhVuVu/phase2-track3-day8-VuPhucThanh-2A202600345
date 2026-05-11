@@ -34,15 +34,24 @@ class MetricsReport(BaseModel):
     scenario_metrics: list[ScenarioMetric]
 
 
-def metric_from_state(state: dict[str, Any], expected_route: str, approval_required: bool) -> ScenarioMetric:
+def metric_from_state(
+    state: dict[str, Any], expected_route: str, approval_required: bool
+) -> ScenarioMetric:
+    steps = state.get("steps", []) or []
     events = state.get("events", []) or []
+    
+    # Fallback for tests or legacy data
+    if not steps and events:
+        steps = [event.get("node", "unknown") for event in events]
+        
     errors = state.get("errors", []) or []
     actual_route = state.get("route")
     approval = state.get("approval")
-    nodes = [event.get("node", "unknown") for event in events]
-    retry_count = sum(1 for node in nodes if node == "retry")
-    interrupt_count = sum(1 for node in nodes if node == "approval")
-    success = actual_route == expected_route and bool(state.get("final_answer") or state.get("pending_question"))
+    retry_count = sum(1 for node in steps if node == "retry")
+    interrupt_count = sum(1 for node in steps if node == "approval")
+    success = actual_route == expected_route and bool(
+        state.get("final_answer") or state.get("pending_question")
+    )
     if approval_required:
         success = success and approval is not None
     return ScenarioMetric(
@@ -50,7 +59,7 @@ def metric_from_state(state: dict[str, Any], expected_route: str, approval_requi
         success=success,
         expected_route=expected_route,
         actual_route=actual_route,
-        nodes_visited=len(nodes),
+        nodes_visited=len(steps),
         retry_count=retry_count,
         interrupt_count=interrupt_count,
         approval_required=approval_required,
